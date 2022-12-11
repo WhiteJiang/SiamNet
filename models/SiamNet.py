@@ -6,7 +6,7 @@ from torch.nn import functional as F
 from torch.nn import init
 import torchvision
 import math
-from models.CSA import SA_FBSM, CA_SE
+from models.CSA import SA, CA_SE
 from models.CRFC import CRA_DOT
 from models.resnet import ResNet_Backbone, Bottleneck, BasicBlock, conv1x1
 
@@ -16,14 +16,16 @@ def Backbone(pretrained=True, progress=True, **kwargs):
     # model = ResNet_Backbone(Bottleneck, [3, 4, 6], **kwargs)
     model = ResNet_Backbone(BasicBlock, [2, 2, 2], **kwargs)
     if pretrained:
-        state_dict = torch.load('/home/jx/code/SiamNet/cub_ft.t')['model_state_dict']
+        # state_dict = torch.load('/home/jx/code/SiamNet/cub_ft.t')['model_state_dict']
+        state_dict = torch.load('/home/jx/code/SiamNet/resnet18.pth')
         # print(state_dict.keys())
         for name in list(state_dict.keys()):
             if 'fc' in name or 'layer4' in name:
                 state_dict.pop(name)
-        for name in model.state_dict().keys():
-            pretrained_name = 'pretrained_model.' + name
-            model.state_dict()[name].copy_(state_dict[pretrained_name])
+        # for name in model.state_dict().keys():
+        #     pretrained_name = 'pretrained_model.' + name
+        #     model.state_dict()[name].copy_(state_dict[pretrained_name])
+        model.load_state_dict(state_dict, strict=False)
     print(model.state_dict())
     return model
 
@@ -106,15 +108,16 @@ def refine(is_local=True, pretrained=True, progress=True, **kwargs):
     # model = Refine(Bottleneck, 3, is_local, **kwargs)
     model = Refine(BasicBlock, 2, is_local, **kwargs)
     if pretrained:
-        state_dict = torch.load('/home/jx/code/SiamNet/cub_ft.t')['model_state_dict']
+        # state_dict = torch.load('/home/jx/code/SiamNet/cub_ft.t')['model_state_dict']
+        state_dict = torch.load('/home/jx/code/SiamNet/resnet18.pth')
         for name in list(state_dict.keys()):
             if not 'layer4' in name:
                 state_dict.pop(name)
-        for name in model.state_dict().keys():
-            if 'layer4' in name:
-                pretrained_name = 'pretrained_model.' + name
-                model.state_dict()[name].copy_(state_dict[pretrained_name])
-        # model.load_state_dict(state_dict, strict=False)
+        # for name in model.state_dict().keys():
+        #     if 'layer4' in name:
+        #         pretrained_name = 'pretrained_model.' + name
+        #         model.state_dict()[name].copy_(state_dict[pretrained_name])
+        model.load_state_dict(state_dict, strict=False)
     return model
 
 """
@@ -129,8 +132,13 @@ class SiamNet(nn.Module):
         self.backbone = Backbone(pretrained=pretrained)
         # 用于生成全局特征。 最后只返回一个bs c h*w的特征 全局级别的转换网络
         self.refine_global = refine(is_local=False, pretrained=pretrained)
+        # self.refine_local = refine(pretrained=pretrained)
         # 用于生成局部特征 局部特征会返回未经池化的特征bs c h w和bs c h*w
+        # self.mid_linear = nn.Linear(512, 128)
+        # self.mid_linear_local = nn.Linear(512, 128)
         self.cls = nn.Linear(512, 200)
+        # self.cls_loc = nn.Linear(512, 200)
+        # self.sa = SA()
         # 哈希激活代码
         self.hash_layer_active = nn.Sequential(
             nn.Tanh(),
@@ -138,8 +146,7 @@ class SiamNet(nn.Module):
         self.code_length = code_length
         # 12 24 32 48
         # global
-        self.W_G = nn.Parameter(torch.Tensor(code_length, 512))
-        torch.nn.init.kaiming_uniform_(self.W_G, a=math.sqrt(5))
+        self.hash_layer_g = nn.Linear(200, code_length)
         # 伯努利分布
         self.bernoulli = torch.distributions.Bernoulli(0.5)
         self.device = device
@@ -149,16 +156,23 @@ class SiamNet(nn.Module):
         out = self.backbone(x)  # .detach()
         # 生成全局特征,基于第三层特征生成
         global_f = self.refine_global(out)
-        # local_f1, avg_local_f1 = self.refine_local(out)
-
-        # 特征映射到哈希码上
-        deep_S_G = F.linear(global_f, self.W_G)
-        # deep_S_1 = F.linear(avg_local_f1, self.W_L1)
+        # local_f = self.sa(out)
+        # local_f1, avg_local_f1 = self.refine_local(local_f)
+        cls = self.cls(global_f)
+        x_mask = F.softmax(cls, dim=-1).detach()
+        # x_mask = torch.ones(cls.size()).detach().cuda() * 0.7  # 0.7
+        for i in range(x_mask.size()[0]):
+            x_mask[i, torch.argmax(cls[i])] += 0.1
+        hash_f = cls + x_mask * cls
+        # hash_l = self.mid_linear_local(avg_local_f1)
+        deep_S_G = self.hash_layer_g(hash_f)
+        # deep_S_1 = F.linear(hash_l, self.W_L)
         deep_S = torch.cat([deep_S_G], dim=1)
         # 哈希激活层
         ret = self.hash_layer_active(deep_S)
         if self.training:
-            cls = self.cls(global_f)
+            # global_f = self.mid_linear(global_f)
+            # cls = self.cls(global_f)
             # cls1 = self.cls_loc(avg_local_f1)
             return ret, global_f, cls
 
@@ -172,7 +186,10 @@ def siamnet(code_length, num_classes, att_size, feat_size, device, pretrained=Fa
 
 
 if __name__ == '__main__':
-    var1 = torch.FloatTensor(1, 1024, 14, 14)
-    var2 = torch.FloatTensor(1, 1024, 14, 14)
-    result = (var1 @ var2.transpose(-2, -1))
-    print(result.shape)
+    var1 = torch.FloatTensor(2, 4)
+    print(var1)
+    # soft = F.softmax(dim=-1)
+    var1 = F.softmax(var1, dim=-1)
+    # var2 = torch.FloatTensor(1, 1024, 14, 14)
+    # result = (var1 @ var2.transpose(-2, -1))
+    print(var1)

@@ -21,6 +21,15 @@ def valid(query_dataloader, train_dataloader, retrieval_dataloader, code_length,
     model.load_state_dict(torch.load('./checkpoints/' + args.info + '/' + str(code_length) + '/model.pth'),
                           strict=False)
     model.eval()
+    # print(model.state_dict()['W_G'])
+    w_g_abs = torch.abs(model.state_dict()['W_G'])
+    for i in range(12):
+        values, index = torch.sort(w_g_abs[i])
+        values = values.cuda()
+        for j in range(len(w_g_abs[i])):
+            if w_g_abs[0][j] < values[127]:
+                model.state_dict()['W_G'][i][j] = 0.0
+    print(model.state_dict()['W_G'])
     query_code = torch.load('./checkpoints/' + args.info + '/' + str(code_length) + '/query_code.pth')
     query_code = query_code.to(args.device)
     query_dataloader.dataset.get_onehot_targets = torch.load(

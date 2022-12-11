@@ -125,11 +125,10 @@ class SALayer(nn.Module):
         return x
 
 
-class SA_FBSM(nn.Module):
+class SA(nn.Module):
     def __init__(self):
-        super(SA_FBSM, self).__init__()
+        super(SA, self).__init__()
         self.sa = SpatialAttention()
-
         self.reset_params()
 
     def reset_params(self):
@@ -139,8 +138,6 @@ class SA_FBSM(nn.Module):
         scale = self.sa(x)
         b, c, h, w = scale.size()
         scale = scale.view(b, c, h * w)
-        # print(scale)
-        # print(scale.size())
         scale_max = torch.max(scale, dim=-1, keepdim=True)[0]
         # scale = scale.view(b, c, h, w)
         scale_suppress = torch.clamp((scale < scale_max * 0.95).float(), min=0.0)
@@ -149,7 +146,7 @@ class SA_FBSM(nn.Module):
         # print(scale_suppress.size())
         x_suppress = x * scale_suppress
         # print(x_suppress)
-        return x, x_suppress
+        return x_suppress
 
 
 class CA_SE(nn.Module):

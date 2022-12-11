@@ -60,9 +60,7 @@ def train(query_dataloader, train_dataloader, retrieval_dataloader, code_length,
 
         # Soft similarity matrix, benefit to converge
         r = S.sum() / (1 - S).sum()
-        # print(r)
         S = S * (1 + r) - r
-        # print(S[:1])
         # Training CNN model
         for epoch in range(args.max_epoch):
             cnn_losses.reset()
@@ -88,8 +86,6 @@ def train(query_dataloader, train_dataloader, retrieval_dataloader, code_length,
                 hash_losses.update(hash_loss.item())
                 quan_losses.update(quan_loss.item())
                 cross_loss.update(cls_loss.item())
-                # logger.info('loss time: {}'.format(time.time() - loss_start))
-                # back_start = time.time()
                 cnn_loss.backward()
                 optimizer.step()
             logger.info(
@@ -111,6 +107,16 @@ def train(query_dataloader, train_dataloader, retrieval_dataloader, code_length,
 
         if it % 1 == 0:
             query_code = generate_code(model, query_dataloader, code_length, args.device)
+            # part_model = model
+            # w_g_abs = torch.abs(part_model.state_dict()['W_G'])
+            # for i in range(12):
+            #     values, index = torch.sort(w_g_abs[i])
+            #     values = values.cuda()
+            #     for j in range(len(w_g_abs[i])):
+            #         if w_g_abs[0][j] < values[30]:
+            #             part_model.state_dict()['W_G'][i][j] = 0.0
+            # print(part_model.state_dict()['W_G'])
+            # part_query_code = generate_code(model, query_dataloader, code_length, args.device)
             # print(len(query_dataloader))
             mAP = evaluate.mean_average_precision(
                 query_code.cuda(),
@@ -120,6 +126,14 @@ def train(query_dataloader, train_dataloader, retrieval_dataloader, code_length,
                 args.device,
                 args.topk,
             )
+            # part_mAP = evaluate.mean_average_precision(
+            #     part_query_code.cuda(),
+            #     B,
+            #     query_dataloader.dataset.get_onehot_targets().cuda(),
+            #     retrieval_targets,
+            #     args.device,
+            #     args.topk,
+            # )
             logger.info(
                 '[iter:{}/{}][code_length:{}][mAP:{:.5f}]'.format(it + 1, args.max_iter, code_length,
                                                                   mAP))
